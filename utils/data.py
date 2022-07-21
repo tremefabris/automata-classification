@@ -12,15 +12,16 @@ from elementar1D import run_automata as generate_automata
 class NewDataGenerator(keras.utils.Sequence):	# I AM normalizing the data before outputting it
 
 	def __init__(self, dataset_size, batch_size=256, dim=(120, 120), impulse='random', radius=1, nstates=2, n_channels=1, n_classes=256, shuffle=True):
-		self.dataset_size = dataset_size
-		self.batch_size   = batch_size
-		self.dim		  = dim
-		self.impulse	  = impulse
-		self.radius		  = radius
-		self.nstates	  = nstates
-		self.n_channels	  = n_channels
-		self.n_classes	  = n_classes
-		self.shuffle	  = shuffle
+		self.dataset_size  = dataset_size
+		self.batch_size    = batch_size
+		self.dim		   = dim
+		self.impulse	   = impulse
+		self.radius		   = radius
+		self.nstates	   = nstates
+		self.n_channels	   = n_channels
+		self.n_classes	   = n_classes
+		self.shuffle	   = shuffle
+		self.dataset_shape = (dataset_size, *dim, n_channels)
 		self.on_epoch_end()
 
 	def __len__(self):

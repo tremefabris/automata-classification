@@ -1,13 +1,17 @@
 import tensorflow as tf
 from tensorflow import keras
+
+from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
+
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import argparse
 
 from utils.data import *
+
 
 def local_plot_automata(autom, name):
 	plt.rcParams['image.cmap'] = 'binary'
@@ -68,20 +72,22 @@ if __name__ == '__main__':
 	args = config_argparser()
 
 	# Data pipelines and necessary information for preprocessing
-	data_info = get_datainfo()
-	params = {'batch_size':128, 'dim':(120, 120), 'n_channels':1, 'n_classes':256, 'shuffle':True}
-	partition, labels, folders = load_IDs_rules(validation_folder='../data/npz/cluster/')	# Validation servindo para pegar os 256 ECAs
+	#data_info = get_datainfo()
+	#params = {'batch_size':128, 'dim':(120, 120), 'n_channels':1, 'n_classes':256, 'shuffle':True}
+	#partition, labels, folders = load_IDs_rules(validation_folder='../data/npz/cluster/')	# Validation servindo para pegar os 256 ECAs
 
-	eca_generator 	  = DataGenerator(partition['validation'], labels, folders['validation'], data_info['val_mean'], data_info['val_var'], **params)
-	testing_generator = DataGenerator(partition['test'], labels, folders['test'], data_info['test_mean'], data_info['test_var'], **params)
+	#eca_generator 	  = DataGenerator(partition['validation'], labels, folders['validation'], data_info['val_mean'], data_info['val_var'], **params)
+	#testing_generator = DataGenerator(partition['test'], labels, folders['test'], data_info['test_mean'], data_info['test_var'], **params)
 
-	# Avaliando empiricamente, constatei que o pooling='max' exalta mais alguns pixels das features. Vou mantê-lo por enquanto...
+	eca_generator     = NewDataGenerator(dataset_size=256, n_channels=3)
+	testing_generator = NewDataGenerator(dataset_size=20480, n_channels=3)
+
 	if args.net.lower() in 'densenet':
-		model = keras.applications.DenseNet121(include_top=False, input_shape=(120, 120, 3), pooling='max')
+		model = keras.applications.DenseNet121(include_top=False, input_shape=(120, 120, 3), pooling='avg')
 	else:
-		model = keras.applications.ResNet50(include_top=False, input_shape=(120, 120, 3), pooling='max')
+		model = keras.applications.ResNet50(include_top=False, input_shape=(120, 120, 3), pooling='avg')
 
-
+	# DEPRECATED
 	if args.view is not None:
 		data = training_generator[0]
 		imgs = data[0][:args.view]
@@ -98,24 +104,70 @@ if __name__ == '__main__':
 
 	if args.kmeans is not None:
 
-		for i, (imgs, labels) in enumerate(testing_generator):	# Esse laço ficou bem ineficiente (memory- and performance-wise)
-			print(f"batch {i} sendo processado")
+		#rgb_automs = np.empty(testing_generator.dataset_shape)
+		#rules      = np.empty(testing_generator.dataset_size)
+
+		for i, (imgs, labels) in enumerate(testing_generator):
+			print(f"BATCH {i} sendo processado")
 			labels = np.argmax(labels, axis=1)
+
 			if i == 0:
-				automs  = imgs[:, :, :, 0]						# O slicing é pra eliminar os canais extras (RGB -> grayscale)
-
-				results = model.predict_on_batch(imgs)
-				rules   = labels
+				rgb_automs = imgs
+				rules      = labels
 			else:
-				automs  = np.concatenate((automs, imgs[:, :, :, 0]), axis=0)
+				rgb_automs = np.concatenate((rgb_automs, imgs), axis=0)
+				rules      = np.concatenate((rules, labels), axis=0)
 
-				temp    = model.predict_on_batch(imgs)
-				results = np.concatenate((results, temp), axis=0)
-				rules   = np.concatenate((rules, labels), axis=0)
+			#if i == 0:
+			#	automs = imgs[:, :, :, 0]
+			#	rules  = labels
+			#else:
+			#	automs = np.concatenate((automs, imgs[:, :, :, 0
 
-		print(f'{results.shape}')
-		print(f'{automs.shape}')
-		print(f'{rules.shape}')
+		#for i, (imgs, labels) in enumerate(testing_generator):	# Esse laço ficou bem ineficiente (memory- and performance-wise)
+		#	print(f"batch {i} sendo processado")
+		#	labels = np.argmax(labels, axis=1)
+		#	if i == 0:
+		#		automs  = imgs[:, :, :, 0]						# O slicing é pra eliminar os canais extras (RGB -> grayscale)
+
+		#		results = model.predict_on_batch(imgs)
+		#		rules   = labels
+		#	else:
+		#		automs  = np.concatenate((automs, imgs[:, :, :, 0]), axis=0)
+
+		#		temp    = model.predict_on_batch(imgs)
+		#		results = np.concatenate((results, temp), axis=0)
+		#		rules   = np.concatenate((rules, labels), axis=0)
+
+		print(f"{rgb_automs.shape=}")
+		print(f"{rules.shape=}")
+
+		#print(f'{results.shape}')
+		#print(f'{automs.shape}')
+		#print(f'{rules.shape}')
+
+		# TODO: RESNET PREDICT
+		gray_automs = rgb_automs[:, :, :, 0]
+
+		# Normalize data before feeding to ResNet
+		data_scaler = np.reshape(gray_automs, (gray_automs.shape[0], -1))	# StandardScaler input: (n_samples, n_features)
+		data_resnet = StandardScaler().fit_transform(data_scaler)
+		print(f"{data_resnet.shape=}")
+
+		#data_resnet = np.reshape(data_resnet, (gray_automs.shape[0], 120, 120, 3))
+
+		# TODO: Precisa usar np.repeat() pra fingir o RGB
+		results     = model.predict(data_resnet, use_multiprocessing=True, workers=8)
+
+		print(f"{data_resnet.shape=}")
+		print(f"{data_resnet[0]=}")
+		print()
+		print(f"{results.shape=}")
+		print(f"{results[0]=}")
+
+		input("AAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+
+		# TODO: FEED TO PCA
 
 		pca 	   = PCA(0.9, svd_solver='full')
 		components = pca.fit_transform(results)		# Até agora sempre foram 55 componentes principais buscando 90%
