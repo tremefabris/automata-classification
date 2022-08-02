@@ -146,7 +146,7 @@ if __name__ == '__main__':
 		#print(f'{automs.shape}')
 		#print(f'{rules.shape}')
 
-		# TODO: RESNET PREDICT
+		# RESNET PREDICT
 		gray_automs = rgb_automs[:, :, :, 0]
 
 		# Normalize data before feeding to ResNet
@@ -156,7 +156,11 @@ if __name__ == '__main__':
 
 		#data_resnet = np.reshape(data_resnet, (gray_automs.shape[0], 120, 120, 3))
 
-		# TODO: Precisa usar np.repeat() pra fingir o RGB
+		# Toda essa transformação torna o cp.repeat do NewDataGenerator inútil
+		data_resnet = np.reshape(data_resnet, (data_resnet.shape[0], 120, 120, 1))
+		print(f"just reshaped --- {data_resnet.shape=}")
+		data_resnet = np.repeat(data_resnet, 3, -1)			# Fingindo o RGB novamente
+		print(f"just repeated --- {data_resnet.shape=}")
 		results     = model.predict(data_resnet, use_multiprocessing=True, workers=8)
 
 		print(f"{data_resnet.shape=}")
@@ -165,17 +169,17 @@ if __name__ == '__main__':
 		print(f"{results.shape=}")
 		print(f"{results[0]=}")
 
-		input("AAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+		#input("AAAAAAAAAAAAAAAAAAAAAAAAAAAA")
 
-		# TODO: FEED TO PCA
+		# FEED TO PCA
 
 		pca 	   = PCA(0.9, svd_solver='full')
-		components = pca.fit_transform(results)		# Até agora sempre foram 55 componentes principais buscando 90%
+		components = pca.fit_transform(results)		# Uai, agora tá dando 14 componentes kkkkkkk
 
-		print(pca.explained_variance_ratio_)
-		print(pca.explained_variance_ratio_.shape)
-		print(np.sum(pca.explained_variance_ratio_))
-		print(components)
+		print(f"{pca.explained_variance_ratio_=}")
+		print(f"{pca.explained_variance_ratio_.shape=}")
+		print(f"{np.sum(pca.explained_variance_ratio_)=}")
+		print(f"{components=}")
 
 		# K-means per se
 		# Passei a armazenar todos os runs do K-means em um vetor pra poder usar depois pros ECAs
@@ -193,6 +197,7 @@ if __name__ == '__main__':
 		print(labels)
 		print(inertias)
 
+		#input("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
 
 		if args.clusters is not None:	# Ou rodo pros clusters do testset, ou rodo pros 256 ECAs
 
@@ -208,21 +213,52 @@ if __name__ == '__main__':
 
 		# Fluxo para rodar os 256 Elementares
 		if args.eca is not None:
-			del automs, results, rules
+			print()
+			print("SENHORAS E SENHORES")
+			print("AGORA É HORA")
+			print("DOS EEEEEEECAAAAAAAAAAAAAAS")
+			print()
+			#del automs, results, rules
 			for i, (imgs, labels) in enumerate(eca_generator):
-				print(f"ECA batch {i} sendo processado")
+				print(f"ECA BATCH {i} sendo processado")
 				labels = np.argmax(labels, axis=1)
+
 				if i == 0:
-					automs  = imgs[:, :, :, 0]						# O slicing é pra eliminar os canais extras (RGB -> grayscale)
-
-					results = model.predict_on_batch(imgs)
-					rules   = labels
+					rgb_automs = imgs
+					rules      = labels
 				else:
-					automs  = np.concatenate((automs, imgs[:, :, :, 0]), axis=0)
+					rgb_automs = np.concatenate((rgb_automs, imgs), axis=0)
+					rules      = np.concatenate((rules, labels), axis=0)
 
-					temp    = model.predict_on_batch(imgs)
-					results = np.concatenate((results, temp), axis=0)
-					rules   = np.concatenate((rules, labels), axis=0)
+			gray_automs = rgb_automs[:, :, :, 0]
+
+			# Normalize data before feeding to ResNet
+			data_scaler = np.reshape(gray_automs, (gray_automs.shape[0], -1))	# StandardScaler input: (n_samples, n_features)
+			data_resnet = StandardScaler().fit_transform(data_scaler)
+			print(f"{data_resnet.shape=}")
+
+			#data_resnet = np.reshape(data_resnet, (gray_automs.shape[0], 120, 120, 3))
+
+			# Toda essa transformação torna o cp.repeat do NewDataGenerator inútil
+			data_resnet = np.reshape(data_resnet, (data_resnet.shape[0], 120, 120, 1))
+			print(f"just reshaped --- {data_resnet.shape=}")
+			data_resnet = np.repeat(data_resnet, 3, -1)			# Fingindo o RGB novamente
+			print(f"just repeated --- {data_resnet.shape=}")
+			results     = model.predict(data_resnet, use_multiprocessing=True, workers=8)
+			#for i, (imgs, labels) in enumerate(eca_generator):
+			#	print(f"ECA batch {i} sendo processado")
+			#	labels = np.argmax(labels, axis=1)
+			#	if i == 0:
+			#		automs  = imgs[:, :, :, 0]						# O slicing é pra eliminar os canais extras (RGB -> grayscale)
+
+			#		results = model.predict_on_batch(imgs)
+			#		rules   = labels
+			#	else:
+			#		automs  = np.concatenate((automs, imgs[:, :, :, 0]), axis=0)
+
+			#		temp    = model.predict_on_batch(imgs)
+			#		results = np.concatenate((results, temp), axis=0)
+			#		rules   = np.concatenate((rules, labels), axis=0)
 
 			eca_components = pca.transform(results)
 
@@ -234,14 +270,15 @@ if __name__ == '__main__':
 			print(eca_labels)
 			print(rules)
 
-			view_max = 100
+			#view_max = 100
+			save_dir = 'resnet/pca'		# plot_automata já inclui data_transfer como diretório inicial
 			for k in args.eca:
 				print(f"PLOTTING FOR {k} CLUSTERS")
 				for i in range(256):
 					group = eca_labels[k-2][i]		# k - 2 pois começo o k-means em k = 2
 					rule  = rules[i]
-					plot_automata(automs[i], f'eca/{k}/rule{rule}_class{group}')
+					plot_automata(gray_automs[i], f'{save_dir}/{k}/rule{rule}_class{group}')
 			print("\nIMAGES SAVED\n")
 
-			dump_rules(args.eca, eca_labels, rules, 'data_transfer/assigned_labels.txt')
+			dump_rules(args.eca, eca_labels, rules, f'data_transfer/{save_dir}/assigned_labels.txt')
 
