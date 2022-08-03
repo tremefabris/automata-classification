@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow import keras
 
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 
@@ -22,6 +22,22 @@ def local_plot_automata(autom, name):
 	plt.savefig(f'{name}.png', bbox_inches='tight')
 	plt.close(fig)
 
+def autoencoder(input_shape, embedding_size):
+	img		= keras.layers.Input(shape=input_shape)
+	e 		= keras.layers.Flatten()(img)							# Para a Resnet, serão 2048 pixels de saída
+	e 		= keras.layers.Dense(units=2048, activation='relu')(e)
+	e		= keras.layers.Dense(units=1000, activation='relu')(e)
+	encoded = keras.layers.Dense(units=embedding_size, activation='relu')(e)
+
+	d       = keras.layers.Dense(units=1000, activation='relu')(encoded)
+	d		= keras.layers.Dense(units=2048, activation='relu')(d)
+	decoded = keras.layers.Reshape(input_shape)(d)
+
+	encoder	    = keras.Model(img, encoded)
+	autoencoder = keras.Model(img, decoded)
+	return autoencoder, encoder
+	
+
 def config_argparser():
 	parser = argparse.ArgumentParser(description="ELEMENTARY CELLULAR AUTOMATA CLASSIFIER (Pretrained ResNet + KMeans)")
 
@@ -35,10 +51,14 @@ def config_argparser():
 	# Para o agrupamento com K-means
 	parser.add_argument('--kmeans', type=int, metavar='N', help="Realiza o agrupamento com K-means de 2 a N k's")
 
+	exc_group1 = parser.add_mutually_exclusive_group()
+	exc_group1.add_argument('--pca', type=float, metavar='N', help="Executa a redução de dimensionalidade com PCA usando N% da variância original")
+	exc_group1.add_argument('--ae', type=int, metavar='L', help="Executa a redução de dimensionalidade com AutoEncoder com L neurônios de codificação")
+
 	# Testset clustering ou ECA clustering
-	exc_group = parser.add_mutually_exclusive_group()
-	exc_group.add_argument('--clusters', nargs='+', type=int, metavar='', help="Define os k's para considerar para análise")
-	exc_group.add_argument('--eca', nargs='+', type=int, metavar='', help="Usando o ECA set, define os k's para considerar para análise")
+	exc_group2 = parser.add_mutually_exclusive_group()
+	exc_group2.add_argument('--clusters', nargs='+', type=int, metavar='', help="Define os k's para considerar para análise")
+	exc_group2.add_argument('--eca', nargs='+', type=int, metavar='', help="Usando o ECA set, define os k's para considerar para análise")
 
 	return parser.parse_args()
 
@@ -71,14 +91,6 @@ def _dump_rules_cluster(k_assignments, rules, fd):	# Escreve para todas classes 
 if __name__ == '__main__':
 	args = config_argparser()
 
-	# Data pipelines and necessary information for preprocessing
-	#data_info = get_datainfo()
-	#params = {'batch_size':128, 'dim':(120, 120), 'n_channels':1, 'n_classes':256, 'shuffle':True}
-	#partition, labels, folders = load_IDs_rules(validation_folder='../data/npz/cluster/')	# Validation servindo para pegar os 256 ECAs
-
-	#eca_generator 	  = DataGenerator(partition['validation'], labels, folders['validation'], data_info['val_mean'], data_info['val_var'], **params)
-	#testing_generator = DataGenerator(partition['test'], labels, folders['test'], data_info['test_mean'], data_info['test_var'], **params)
-
 	eca_generator     = NewDataGenerator(dataset_size=256, n_channels=3)
 	testing_generator = NewDataGenerator(dataset_size=20480, n_channels=3)
 
@@ -104,8 +116,8 @@ if __name__ == '__main__':
 
 	if args.kmeans is not None:
 
-		#rgb_automs = np.empty(testing_generator.dataset_shape)
-		#rules      = np.empty(testing_generator.dataset_size)
+		# TODO: Recuperar também os .predict da ResNet para exibir no relatório
+		# TODO: Começar a reimplementação do autoencoder
 
 		for i, (imgs, labels) in enumerate(testing_generator):
 			print(f"BATCH {i} sendo processado")
@@ -118,33 +130,8 @@ if __name__ == '__main__':
 				rgb_automs = np.concatenate((rgb_automs, imgs), axis=0)
 				rules      = np.concatenate((rules, labels), axis=0)
 
-			#if i == 0:
-			#	automs = imgs[:, :, :, 0]
-			#	rules  = labels
-			#else:
-			#	automs = np.concatenate((automs, imgs[:, :, :, 0
-
-		#for i, (imgs, labels) in enumerate(testing_generator):	# Esse laço ficou bem ineficiente (memory- and performance-wise)
-		#	print(f"batch {i} sendo processado")
-		#	labels = np.argmax(labels, axis=1)
-		#	if i == 0:
-		#		automs  = imgs[:, :, :, 0]						# O slicing é pra eliminar os canais extras (RGB -> grayscale)
-
-		#		results = model.predict_on_batch(imgs)
-		#		rules   = labels
-		#	else:
-		#		automs  = np.concatenate((automs, imgs[:, :, :, 0]), axis=0)
-
-		#		temp    = model.predict_on_batch(imgs)
-		#		results = np.concatenate((results, temp), axis=0)
-		#		rules   = np.concatenate((rules, labels), axis=0)
-
 		print(f"{rgb_automs.shape=}")
 		print(f"{rules.shape=}")
-
-		#print(f'{results.shape}')
-		#print(f'{automs.shape}')
-		#print(f'{rules.shape}')
 
 		# RESNET PREDICT
 		gray_automs = rgb_automs[:, :, :, 0]
@@ -153,8 +140,6 @@ if __name__ == '__main__':
 		data_scaler = np.reshape(gray_automs, (gray_automs.shape[0], -1))	# StandardScaler input: (n_samples, n_features)
 		data_resnet = StandardScaler().fit_transform(data_scaler)
 		print(f"{data_resnet.shape=}")
-
-		#data_resnet = np.reshape(data_resnet, (gray_automs.shape[0], 120, 120, 3))
 
 		# Toda essa transformação torna o cp.repeat do NewDataGenerator inútil
 		data_resnet = np.reshape(data_resnet, (data_resnet.shape[0], 120, 120, 1))
@@ -169,17 +154,27 @@ if __name__ == '__main__':
 		print(f"{results.shape=}")
 		print(f"{results[0]=}")
 
-		#input("AAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+		# FEED TO DR
 
-		# FEED TO PCA
+		if args.ae is not None:
+			data_ae = MinMaxScaler().fit_transform(results)
 
-		pca 	   = PCA(0.9, svd_solver='full')
-		components = pca.fit_transform(results)		# Uai, agora tá dando 14 componentes kkkkkkk
+			autoenc, enc = autoencoder(results.shape[1:], args.ae)
 
-		print(f"{pca.explained_variance_ratio_=}")
-		print(f"{pca.explained_variance_ratio_.shape=}")
-		print(f"{np.sum(pca.explained_variance_ratio_)=}")
-		print(f"{components=}")
+			autoenc.compile(optimizer='adam', loss='mse', metrics=['accuracy'])
+			autoenc.fit(x=data_ae, y=data_ae, batch_size=64, epochs=1000, validation_split=0.1) # Talvez colocar um milhão de autômatos pra treinar aqui
+			data_kmeans = enc.predict(data_ae, batch_size=64)
+
+		if args.pca is not None:
+			pca 	    = PCA(0.9, svd_solver='full')
+			data_kmeans = pca.fit_transform(results)		# Uai, agora tá dando 14 componentes kkkkkkk
+
+			print(f"{pca.explained_variance_ratio_=}")
+			print(f"{pca.explained_variance_ratio_.shape=}")
+			print(f"{np.sum(pca.explained_variance_ratio_)=}")
+			print(f"{data_kmeans=}")
+
+		#input("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
 
 		# K-means per se
 		# Passei a armazenar todos os runs do K-means em um vetor pra poder usar depois pros ECAs
@@ -190,7 +185,7 @@ if __name__ == '__main__':
 		for k in range(2, args.kmeans + 1):
 			print(f"...initiating kmeans for {k} clusters...")
 			kms[k - 2] = KMeans(n_clusters=k, init='k-means++', n_init=100, random_state=42, verbose=0)
-			km_fit = kms[k - 2].fit_transform(components)		# Podia estar usando fit_predict()
+			km_fit = kms[k - 2].fit_transform(data_kmeans)		# Podia estar usando fit_predict()
 			labels.append(kms[k - 2].labels_)
 			inertias.append(kms[k - 2].inertia_)
 
@@ -213,12 +208,17 @@ if __name__ == '__main__':
 
 		# Fluxo para rodar os 256 Elementares
 		if args.eca is not None:
+			if args.pca is not None:
+				save_dir = 'resnet/pca'		# plot_automata já inclui data_transfer como diretório inicial
+			elif args.ae is not None:
+				save_dir = 'resnet/ae'
+
 			print()
 			print("SENHORAS E SENHORES")
 			print("AGORA É HORA")
 			print("DOS EEEEEEECAAAAAAAAAAAAAAS")
 			print()
-			#del automs, results, rules
+			
 			for i, (imgs, labels) in enumerate(eca_generator):
 				print(f"ECA BATCH {i} sendo processado")
 				labels = np.argmax(labels, axis=1)
@@ -230,14 +230,12 @@ if __name__ == '__main__':
 					rgb_automs = np.concatenate((rgb_automs, imgs), axis=0)
 					rules      = np.concatenate((rules, labels), axis=0)
 
-			gray_automs = rgb_automs[:, :, :, 0]
+			gray_automs = rgb_automs[:, :, :, 0]		# TODO: Toda essa transformação é passível de modularização
 
 			# Normalize data before feeding to ResNet
 			data_scaler = np.reshape(gray_automs, (gray_automs.shape[0], -1))	# StandardScaler input: (n_samples, n_features)
 			data_resnet = StandardScaler().fit_transform(data_scaler)
 			print(f"{data_resnet.shape=}")
-
-			#data_resnet = np.reshape(data_resnet, (gray_automs.shape[0], 120, 120, 3))
 
 			# Toda essa transformação torna o cp.repeat do NewDataGenerator inútil
 			data_resnet = np.reshape(data_resnet, (data_resnet.shape[0], 120, 120, 1))
@@ -245,33 +243,34 @@ if __name__ == '__main__':
 			data_resnet = np.repeat(data_resnet, 3, -1)			# Fingindo o RGB novamente
 			print(f"just repeated --- {data_resnet.shape=}")
 			results     = model.predict(data_resnet, use_multiprocessing=True, workers=8)
-			#for i, (imgs, labels) in enumerate(eca_generator):
-			#	print(f"ECA batch {i} sendo processado")
-			#	labels = np.argmax(labels, axis=1)
-			#	if i == 0:
-			#		automs  = imgs[:, :, :, 0]						# O slicing é pra eliminar os canais extras (RGB -> grayscale)
 
-			#		results = model.predict_on_batch(imgs)
-			#		rules   = labels
-			#	else:
-			#		automs  = np.concatenate((automs, imgs[:, :, :, 0]), axis=0)
+			if args.ae is not None:
+				data_ae = MinMaxScaler().fit_transform(results)
 
-			#		temp    = model.predict_on_batch(imgs)
-			#		results = np.concatenate((results, temp), axis=0)
-			#		rules   = np.concatenate((rules, labels), axis=0)
+				#autoenc, enc = autoencoder(results.shape[1:], args.ae)
 
-			eca_components = pca.transform(results)
+				#autoenc.compile(optimizer='adam', loss='mse', metrics=['accuracy'])
+				#autoenc.fit(x=data_ae, y=data_ae, batch_size=64, epochs=500, validation_split=0.1)
+				data_eca = enc.predict(data_ae, batch_size=64)
+				#data_ae = MinMaxScaler().fit_transform(results)
+				#data_eca = enc.predict(data_ae, batch_size=64)
+
+			if args.pca is not None:
+				data_eca = pca.transform(results)
+
+			# Salva as características extraídas pela ResNet dos 256 ECAs
+			np.savez(f'data_transfer/{save_dir}/resnet_feat_extraction.npz', feats=results, rules=rules)
+			if args.eca is not None:
+				np.savez(f'data_transfer/{save_dir}/ae_dr.npz', embedding=data_eca, rules=rules)
 
 			eca_labels = []
 			for k in range(2, args.kmeans):
-				km_pred = kms[k - 2].predict(eca_components)
+				km_pred = kms[k - 2].predict(data_eca)
 				eca_labels.append(km_pred)
 
 			print(eca_labels)
 			print(rules)
 
-			#view_max = 100
-			save_dir = 'resnet/pca'		# plot_automata já inclui data_transfer como diretório inicial
 			for k in args.eca:
 				print(f"PLOTTING FOR {k} CLUSTERS")
 				for i in range(256):

@@ -9,6 +9,14 @@ from elementar1D import run_automata as generate_automata
 
 
 # TODO: Tirar o "New" quando terminar a implementação, colocar "Old" no DataGenerator antigo
+
+# TODO:
+#		Com essa implementação, eu tô gerando imagens novas a cada época. O diagrama da regra 110 de uma época
+#		não é o mesmo do diagrama da próxima ou da anterior. Isso pode ser um problema (perguntar pro Scabini).
+#		
+#		Se isso for um problema, talvez eu possa salvar um array de shape (dataset_size // batch_size, dim[0])
+#		com todos os impulsos iniciais e gerar os diagramas a cada época.
+#
 class NewDataGenerator(keras.utils.Sequence):	# I AM normalizing the data before outputting it
 
 	def __init__(self, dataset_size, batch_size=256, dim=(120, 120), impulse='random', radius=1, nstates=2, n_channels=1, n_classes=256, shuffle=True):
