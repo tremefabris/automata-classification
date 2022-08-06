@@ -11,6 +11,9 @@ import pandas as pd
 import argparse
 
 from utils.data import *
+from utils.scaling import *
+
+from sys import exit
 
 
 def local_plot_automata(autom, name):
@@ -27,9 +30,11 @@ def autoencoder(input_shape, embedding_size):
 	e 		= keras.layers.Flatten()(img)							# Para a Resnet, serão 2048 pixels de saída
 	e 		= keras.layers.Dense(units=2048, activation='relu')(e)
 	e		= keras.layers.Dense(units=1000, activation='relu')(e)
+	e 		= keras.layers.Dense(units=500, activation='relu')(e)
 	encoded = keras.layers.Dense(units=embedding_size, activation='relu')(e)
 
-	d       = keras.layers.Dense(units=1000, activation='relu')(encoded)
+	d 		= keras.layers.Dense(units=500, activation='relu')(encoded)
+	d       = keras.layers.Dense(units=1000, activation='relu')(d)
 	d		= keras.layers.Dense(units=2048, activation='relu')(d)
 	decoded = keras.layers.Reshape(input_shape)(d)
 
@@ -92,69 +97,74 @@ if __name__ == '__main__':
 	args = config_argparser()
 
 	eca_generator     = NewDataGenerator(dataset_size=256, n_channels=3)
-	testing_generator = NewDataGenerator(dataset_size=20480, n_channels=3)
+	diagram_generator = NewDataGenerator(dataset_size=10240, n_channels=3)	# Originalmente: dataset_size=81920
+
+	#test_scaler_gen1  = NewDataGenerator(dataset_size=1024, n_channels=3)
+	#test_scaler_gen2  = NewDataGenerator(dataset_size=1024, n_channels=1)
+
 
 	if args.net.lower() in 'densenet':
 		model = keras.applications.DenseNet121(include_top=False, input_shape=(120, 120, 3), pooling='avg')
 	else:
 		model = keras.applications.ResNet50(include_top=False, input_shape=(120, 120, 3), pooling='avg')
 
-	# DEPRECATED
-	if args.view is not None:
-		data = training_generator[0]
-		imgs = data[0][:args.view]
-		labels = np.argmax(data[1][:args.view], axis=1)	# Transformando de one-hot pra inteiro
-
-		results = model(imgs)
-		results = np.reshape(results, (-1, 64, 32))		# Pra plottar nos .pngs
-
-		if args.save:									# Meio redundante?
-			for autom, label, feats in zip(imgs, labels, results):
-				plot_automata(autom, f'rule{label}_img')
-				plot_automata(feats, f'rule{label}_feat')
-			print("\nIMAGES SAVED\n")
-
 	if args.kmeans is not None:
 
 		# TODO: Recuperar também os .predict da ResNet para exibir no relatório
-		# TODO: Começar a reimplementação do autoencoder
 
-		for i, (imgs, labels) in enumerate(testing_generator):
-			print(f"BATCH {i} sendo processado")
-			labels = np.argmax(labels, axis=1)
+		#for i, (imgs, labels) in enumerate(testing_generator):
+		#	print(f"BATCH {i} sendo processado")
+		#	labels = np.argmax(labels, axis=1)
 
-			if i == 0:
-				rgb_automs = imgs
-				rules      = labels
-			else:
-				rgb_automs = np.concatenate((rgb_automs, imgs), axis=0)
-				rules      = np.concatenate((rules, labels), axis=0)
+		#	if i == 0:
+		#		rgb_automs = imgs
+		#		rules      = labels
+		#	else:
+		#		rgb_automs = np.concatenate((rgb_automs, imgs), axis=0)
+		#		rules      = np.concatenate((rules, labels), axis=0)
 
-		print(f"{rgb_automs.shape=}")
-		print(f"{rules.shape=}")
+		# Utilizando a nova classe ContinuousScaling
+		cScaler = ContinuousScaler(StandardScaler(), image_shape=(120, 120), n_channels=3)
+		for idx, (images, _) in enumerate(diagram_generator):	# TODO: Para deploy, remover o enumerate
+			print(f"batch {idx} is now processing")
+			cScaler.continuous_train(images)
+
+		diagram_generator.on_epoch_end()		# refills the datagenerator
+		diagram_generator.add_trained_scaler(cScaler)
+		
+		# Testando o outcome de testing_generator antes de depois da aplicação do ContinuousScaler
+
+		#print(f"{rgb_automs.shape=}")
+		#print(f"{rules.shape=}")
 
 		# RESNET PREDICT
-		gray_automs = rgb_automs[:, :, :, 0]
+		#gray_automs = rgb_automs[:, :, :, 0]
 
 		# Normalize data before feeding to ResNet
-		data_scaler = np.reshape(gray_automs, (gray_automs.shape[0], -1))	# StandardScaler input: (n_samples, n_features)
-		data_resnet = StandardScaler().fit_transform(data_scaler)
-		print(f"{data_resnet.shape=}")
+		#data_scaler = np.reshape(gray_automs, (gray_automs.shape[0], -1))	# StandardScaler input: (n_samples, n_features)
+		#data_resnet = StandardScaler().fit_transform(data_scaler)
+		#print(f"{data_resnet.shape=}")
 
 		# Toda essa transformação torna o cp.repeat do NewDataGenerator inútil
-		data_resnet = np.reshape(data_resnet, (data_resnet.shape[0], 120, 120, 1))
-		print(f"just reshaped --- {data_resnet.shape=}")
-		data_resnet = np.repeat(data_resnet, 3, -1)			# Fingindo o RGB novamente
-		print(f"just repeated --- {data_resnet.shape=}")
-		results     = model.predict(data_resnet, use_multiprocessing=True, workers=8)
+		#data_resnet = np.reshape(data_resnet, (data_resnet.shape[0], 120, 120, 1))
+		#print(f"just reshaped --- {data_resnet.shape=}")
+		#data_resnet = np.repeat(data_resnet, 3, -1)			# Fingindo o RGB novamente
+		#print(f"just repeated --- {data_resnet.shape=}")
 
-		print(f"{data_resnet.shape=}")
-		print(f"{data_resnet[0]=}")
+		# Multiprocessing não funciona com CuPy - fonte: https://github.com/explosion/spaCy/issues/5507
+		# Por causa disso, talvez seja muito melhor mudar completamente a implementação do NewDataGenerator
+		# e fazê-lo utilizar np ao invés de cp
+		extracted_features = model.predict(diagram_generator, use_multiprocessing=True, workers=8)
+
+		print(f"{extracted_features.shape=}")
+		print(f"{extracted_features[0]=}")
 		print()
-		print(f"{results.shape=}")
-		print(f"{results[0]=}")
 
-		# FEED TO DR
+		exit()
+		#input("FINALIZAR EXECUÇÃO AGORA")
+
+		# TODO: Criar novo ContinuousScaler pro MinMaxScaler e treiná-lo também.
+		# TODO: Adaptar todo o código abaixo para o novo esquema de ContinuousScaler
 
 		if args.ae is not None:
 			data_ae = MinMaxScaler().fit_transform(results)
@@ -162,8 +172,11 @@ if __name__ == '__main__':
 			autoenc, enc = autoencoder(results.shape[1:], args.ae)
 
 			autoenc.compile(optimizer='adam', loss='mse', metrics=['accuracy'])
-			autoenc.fit(x=data_ae, y=data_ae, batch_size=64, epochs=1000, validation_split=0.1) # Talvez colocar um milhão de autômatos pra treinar aqui
-			data_kmeans = enc.predict(data_ae, batch_size=64)
+			autoenc.fit(x=data_ae, y=data_ae, batch_size=256, epochs=1000, validation_split=0.1) # Talvez colocar um milhão de autômatos pra treinar aqui
+			#ae_results = StandardScaler.fit_transform
+			#ae_results = model.predict(x=NewDataGenerator(dataset_size=384000, n_channels)
+			#autoenc.fit(x=NewDataGenerator(dataset_size=384000, n_channels)
+			data_kmeans = enc.predict(data_ae, batch_size=256)
 
 		if args.pca is not None:
 			pca 	    = PCA(0.9, svd_solver='full')
@@ -251,7 +264,7 @@ if __name__ == '__main__':
 
 				#autoenc.compile(optimizer='adam', loss='mse', metrics=['accuracy'])
 				#autoenc.fit(x=data_ae, y=data_ae, batch_size=64, epochs=500, validation_split=0.1)
-				data_eca = enc.predict(data_ae, batch_size=64)
+				data_eca = enc.predict(data_ae, batch_size=256)
 				#data_ae = MinMaxScaler().fit_transform(results)
 				#data_eca = enc.predict(data_ae, batch_size=64)
 

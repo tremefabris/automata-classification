@@ -1,22 +1,17 @@
 import numpy as np
-import cupy as cp
+#import cupy as cp
 import matplotlib.pyplot as plt
 from tensorflow import keras
 from glob import glob
 import re
 
-from elementar1D import run_automata as generate_automata
+from utils.elementar1D import run_automata as generate_automata
 
 
 # TODO: Tirar o "New" quando terminar a implementação, colocar "Old" no DataGenerator antigo
 
-# TODO:
-#		Com essa implementação, eu tô gerando imagens novas a cada época. O diagrama da regra 110 de uma época
-#		não é o mesmo do diagrama da próxima ou da anterior. Isso pode ser um problema (perguntar pro Scabini).
-#		
-#		Se isso for um problema, talvez eu possa salvar um array de shape (dataset_size // batch_size, dim[0])
-#		com todos os impulsos iniciais e gerar os diagramas a cada época.
-#
+
+# TODO: Adicionando add_trained_scaler e incluindo ele no final de __getitem__
 class NewDataGenerator(keras.utils.Sequence):	# I AM normalizing the data before outputting it
 
 	def __init__(self, dataset_size, batch_size=256, dim=(120, 120), impulse='random', radius=1, nstates=2, n_channels=1, n_classes=256, shuffle=True):
@@ -30,6 +25,7 @@ class NewDataGenerator(keras.utils.Sequence):	# I AM normalizing the data before
 		self.n_classes	   = n_classes
 		self.shuffle	   = shuffle
 		self.dataset_shape = (dataset_size, *dim, n_channels)
+		self.scaler		   = None
 		self.on_epoch_end()
 
 	def __len__(self):
@@ -37,32 +33,37 @@ class NewDataGenerator(keras.utils.Sequence):	# I AM normalizing the data before
 
 	def __data_generation(self, batch_rules):
 
-		X = cp.empty((self.batch_size, *self.dim, 1))
-		y = cp.empty((self.batch_size), dtype=int)
+		X = np.empty((self.batch_size, *self.dim, 1))
+		y = np.empty((self.batch_size), dtype=int)
 
-		for i, rule in enumerate(batch_rules.get()):		# Converting to np.ndarray for compatibility with elementar1D
+		for i, rule in enumerate(batch_rules):		# Converting to np.ndarray for compatibility with elementar1D
 			tmp    = generate_automata(rule, *self.dim, self.impulse, self.radius, self.nstates)
-			tmp    = cp.array(np.reshape(tmp.get(), (*self.dim, 1)))
+			tmp    = np.array(np.reshape(tmp, (*self.dim, 1)))
 			X[i, ] = tmp
 			y[i]   = rule
 
 		if self.n_channels != 1:
-			X = cp.repeat(X, self.n_channels, -1)		# Se as imagens precisam ter outra quantidade de canais
-		return X.get(), keras.utils.to_categorical(y.get(), num_classes=self.n_classes)
+			X = np.repeat(X, self.n_channels, -1)		# Se as imagens precisam ter outra quantidade de canais
+		return X, keras.utils.to_categorical(y, num_classes=self.n_classes)
 
 	def __getitem__(self, index):
 		batch_round_rules = self.rules[index * self.batch_size : (index + 1) * self.batch_size]
 
 		X, y = self.__data_generation(batch_round_rules)
+		if self.scaler is not None:
+			X = self.scaler.continuous_transform(X)
 		return X, y	
 
+	def add_trained_scaler(self, continuous_scaler):	# Marca o fim do processo de treinamento do scaler
+		self.scaler = continuous_scaler					# e o começo das classificações
+
 	def on_epoch_end(self):
-		self.rules = cp.array([], dtype=int)
+		self.rules = np.array([], dtype=int)
 		for i in range(self.dataset_size // self.batch_size):
-			self.rules = cp.concatenate((self.rules, cp.arange(self.batch_size)), axis=0)
+			self.rules = np.concatenate((self.rules, np.arange(self.batch_size)), axis=0)
 		
 		if self.shuffle == True:
-			cp.random.shuffle(self.rules)
+			np.random.shuffle(self.rules)
 
 # TODO: Hora de refatorar DataGenerator
 class DataGenerator(keras.utils.Sequence):	# I AM normalizing the data before outputting it

@@ -1,7 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import cupy as cp
 import argparse
+
+print()
+print()
+print("É ESSE AQUI MESMO")
+print()
+print()
 
 # Inicializando a matriz que será a malha para nossos autômatos
 def init_matrix(rows: int, cols: int):
@@ -14,12 +19,12 @@ def init_matrix(rows: int, cols: int):
         Output:
             mat ((int, int)): initialized matrix with all zeros. '''
 	
-	return cp.zeros((rows, cols), dtype=int)
+	return np.zeros((rows, cols), dtype=int)
 
 # Retorna o array com o impulso inicial, fornecido pelo usuário como parâmetro
 def config_impulse(impulse_type: str, size: int, k: int):
 
-    first_impulse = cp.zeros(size, dtype=int)
+    first_impulse = np.zeros(size, dtype=int)
     impulse_str = impulse_type.lower()
 
     if impulse_str == "custom":
@@ -27,12 +32,12 @@ def config_impulse(impulse_type: str, size: int, k: int):
         print("\nCustom seed must be the decimal codification of the array of alive cells.")
         aux_seed = int(input("SEED: "))
 
-        str_seed = cp.base_repr(aux_seed, base=k)
+        str_seed = np.base_repr(aux_seed, base=k)
         for i in range(1, len(str_seed) + 1):
             first_impulse[-i] = int(str_seed[-i])
     
     elif impulse_str == "random":
-        first_impulse = cp.random.choice(range(k), size=size)
+        first_impulse = np.random.choice(range(k), size=size)
 
     else:
         start = int(input("Value of initial cell (0 <= val < {}): ".format(k)))
@@ -54,8 +59,8 @@ def rule_array(rule_num: int, r: int, k: int):
     nbhd = 2*r + 1          # nbhd: neighborhood
     pstt = k ** nbhd        # pstt: possible states
 
-    rule_arr = cp.zeros(pstt, dtype=int)
-    rule_str = cp.base_repr(rule_num, base=k, padding=pstt)[-pstt:]
+    rule_arr = np.zeros(pstt, dtype=int)
+    rule_str = np.base_repr(rule_num, base=k, padding=pstt)[-pstt:]
 
     for i in range(pstt):
         rule_arr[i] = int(rule_str[ -(i + 1) ])
@@ -68,18 +73,18 @@ def gen_calc(matrix, num_gen: int, rule_arr, r: int):
     nbhd      = 2*r + 1
     size_gen  = len(matrix[0])
     mid_index = nbhd // 2
-    POWERS_2  = cp.array(  list(map(lambda x: 2**x, range(nbhd))), dtype=int  )
+    POWERS_2  = np.array(  list(map(lambda x: 2**x, range(nbhd))), dtype=int  )
 
     for i in range(num_gen - 1):
-        next_index = cp.zeros(size_gen, dtype=int)
+        next_index = np.zeros(size_gen, dtype=int)
         
         gen = matrix[i]
         for j in range(1, r + 1):
-            next_index += POWERS_2[mid_index + j] * cp.roll(gen,  j)
-            next_index += POWERS_2[mid_index - j] * cp.roll(gen, -j)
+            next_index += POWERS_2[mid_index + j] * np.roll(gen,  j)
+            next_index += POWERS_2[mid_index - j] * np.roll(gen, -j)
         next_index += POWERS_2[mid_index] * gen
         
-        matrix[i+1] = cp.take(rule_arr, next_index)
+        matrix[i+1] = np.take(rule_arr, next_index)
     
     return matrix
 
@@ -107,7 +112,7 @@ def run_automata(rule: int, H: int, W: int, seed: str, r: int, k: int):
 	
     matrix_ca = init_matrix(H, W)
     matrix_ca[0] = config_impulse(seed, W, k)
-	
+
     return gen_calc(matrix_ca, H, rule_index, r)
 
 def config_argparser():
