@@ -97,7 +97,8 @@ if __name__ == '__main__':
 	args = config_argparser()
 
 	eca_generator     = NewDataGenerator(dataset_size=256, n_channels=3)
-	diagram_generator = NewDataGenerator(dataset_size=10240, n_channels=3)	# Originalmente: dataset_size=81920
+	diagram_generator = NewDataGenerator(dataset_size=512000, n_channels=3)	# Originalmente: dataset_size=81920
+	test_ae_generator = NewDataGenerator(dataset_size=51200, n_channels=3)
 
 	#test_scaler_gen1  = NewDataGenerator(dataset_size=1024, n_channels=3)
 	#test_scaler_gen2  = NewDataGenerator(dataset_size=1024, n_channels=1)
@@ -132,51 +133,48 @@ if __name__ == '__main__':
 		diagram_generator.on_epoch_end()		# refills the datagenerator
 		diagram_generator.add_trained_scaler(cScaler)
 		
-		# Testando o outcome de testing_generator antes de depois da aplicação do ContinuousScaler
+		extracted_features = model.predict(diagram_generator, use_multiprocessing=True, workers=4, verbose=1)
 
-		#print(f"{rgb_automs.shape=}")
-		#print(f"{rules.shape=}")
-
-		# RESNET PREDICT
-		#gray_automs = rgb_automs[:, :, :, 0]
-
-		# Normalize data before feeding to ResNet
-		#data_scaler = np.reshape(gray_automs, (gray_automs.shape[0], -1))	# StandardScaler input: (n_samples, n_features)
-		#data_resnet = StandardScaler().fit_transform(data_scaler)
-		#print(f"{data_resnet.shape=}")
-
-		# Toda essa transformação torna o cp.repeat do NewDataGenerator inútil
-		#data_resnet = np.reshape(data_resnet, (data_resnet.shape[0], 120, 120, 1))
-		#print(f"just reshaped --- {data_resnet.shape=}")
-		#data_resnet = np.repeat(data_resnet, 3, -1)			# Fingindo o RGB novamente
-		#print(f"just repeated --- {data_resnet.shape=}")
-
-		# Multiprocessing não funciona com CuPy - fonte: https://github.com/explosion/spaCy/issues/5507
-		# Por causa disso, talvez seja muito melhor mudar completamente a implementação do NewDataGenerator
-		# e fazê-lo utilizar np ao invés de cp
-		extracted_features = model.predict(diagram_generator, use_multiprocessing=True, workers=8)
-
+		print(f"{extracted_features.nbytes=}")
 		print(f"{extracted_features.shape=}")
 		print(f"{extracted_features[0]=}")
 		print()
 
-		exit()
-		#input("FINALIZAR EXECUÇÃO AGORA")
+		#exit()
 
 		# TODO: Criar novo ContinuousScaler pro MinMaxScaler e treiná-lo também.
 		# TODO: Adaptar todo o código abaixo para o novo esquema de ContinuousScaler
 
 		if args.ae is not None:
-			data_ae = MinMaxScaler().fit_transform(results)
+			# Talvez nem precise fazer partial_fit com MinMax, já que extracted_features já fica inteiro na memória
+			#cScaler_minmax = ContinuousScaler(MinMaxScaler(), image_shape=(120, 120), n_channels=3)
 
-			autoenc, enc = autoencoder(results.shape[1:], args.ae)
+			data_ae = MinMaxScaler().fit_transform(extracted_features)
+			print(f"{data_ae.shape=}")
+
+			autoenc, enc = autoencoder(data_ae.shape[1:], args.ae)
 
 			autoenc.compile(optimizer='adam', loss='mse', metrics=['accuracy'])
 			autoenc.fit(x=data_ae, y=data_ae, batch_size=256, epochs=1000, validation_split=0.1) # Talvez colocar um milhão de autômatos pra treinar aqui
-			#ae_results = StandardScaler.fit_transform
-			#ae_results = model.predict(x=NewDataGenerator(dataset_size=384000, n_channels)
-			#autoenc.fit(x=NewDataGenerator(dataset_size=384000, n_channels)
-			data_kmeans = enc.predict(data_ae, batch_size=256)
+
+			# Avaliando os resultados do autoencoder
+			test_ae_cScaler = ContinuousScaler(StandardScaler(), image_shape=(120, 120), n_channels=3)
+			
+			for idx, (images, _) in enumerate(test_ae_generator):	# TODO: Para deploy, remover o enumerate
+				print(f"TEST: batch {idx} is now processing")
+				test_ae_cScaler.continuous_train(images)
+
+			test_ae_generator.on_epoch_end()		# refills the datagenerator
+			test_ae_generator.add_trained_scaler(test_ae_cScaler)
+			print("Autoencoder evaluate")
+			test_extfeat = model.predict(test_ae_generator, use_multiprocessing=True, workers=4, verbose=1)
+			test_feedae  = MinMaxScaler().fit_transform(test_extfeat)
+			autoenc.evaluate(x=test_feedae, y=test_feedae, batch_size=256, verbose=1)
+
+			data_kmeans = enc.predict(data_ae, batch_size=256, verbose=1)
+
+			print(f"{data_kmeans.shape=}")
+			exit()
 
 		if args.pca is not None:
 			pca 	    = PCA(0.9, svd_solver='full')
