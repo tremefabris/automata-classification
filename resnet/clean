@@ -1,4 +1,0 @@
-#! /bin/bash
-
-rm data_transfer/resnet/assigned_labels.txt
-for f in {2..15}; do rm data_transfer/resnet/$1/$f/* ; done
